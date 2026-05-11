@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  db:
+    build: ./database
+    container_name: cruzazul-db
+    environment:
+      POSTGRES_PASSWORD: tu_password
+      POSTGRES_DB: cruzazul
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - azul-net
+    ports:
+      - "5432:5432"   # Solo para pruebas, luego quitar
+
+  frontend:
+    build: ./frontend
+    container_name: cruzazul-frontend
+    depends_on:
+      - db
+    ports:
+      - "80:3000"
+    networks:
+      - azul-net
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=db
+      - DB_NAME=cruzazul
+      - DB_USER=postgres
+      - DB_PASSWORD=tu_password
+
+volumes:
+  db_data:
+
+networks:
+  azul-net:
+    driver: bridge

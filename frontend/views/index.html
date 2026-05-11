@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ERP Cruz Azul</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { color: #1a1a2e; margin-bottom: 20px; }
+    .card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); margin-bottom: 20px; }
+    form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    form input, form textarea { padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+    form textarea { grid-column: span 2; }
+    form button { grid-column: span 2; padding: 10px; background: #1a1a2e; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    form button:hover { background: #16213e; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f8f9fa; color: #333; }
+    .badge { background: #e8f5e9; color: #2e7d32; padding: 4px 8px; border-radius: 12px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ERP Cruz Azul — Productos</h1>
+
+    <div class="card">
+      <h2 style="margin-bottom: 12px;">Nuevo producto</h2>
+      <form id="productoForm">
+        <input type="text" id="nombre" placeholder="Nombre" required>
+        <input type="number" id="precio" placeholder="Precio" step="0.01" required>
+        <input type="number" id="stock" placeholder="Stock" required>
+        <textarea id="descripcion" placeholder="Descripción" rows="2"></textarea>
+        <button type="submit">Agregar producto</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-bottom: 12px;">Listado de productos</h2>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Nombre</th><th>Descripción</th><th>Precio</th><th>Stock</th></tr>
+        </thead>
+        <tbody id="tablaProductos"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    async function cargarProductos() {
+      const res = await fetch('/api/productos');
+      const productos = await res.json();
+      const tbody = document.getElementById('tablaProductos');
+      tbody.innerHTML = productos.map(p => `
+        <tr>
+          <td>${p.id}</td>
+          <td><strong>${p.nombre}</strong></td>
+          <td>${p.descripcion || '-'}</td>
+          <td>$${Number(p.precio).toFixed(2)}</td>
+          <td><span class="badge">${p.stock}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('productoForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await fetch('/api/productos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre: document.getElementById('nombre').value,
+          descripcion: document.getElementById('descripcion').value,
+          precio: parseFloat(document.getElementById('precio').value),
+          stock: parseInt(document.getElementById('stock').value)
+        })
+      });
+      document.getElementById('productoForm').reset();
+      cargarProductos();
+    });
+
+    cargarProductos();
+  </script>
+</body>
+</html>

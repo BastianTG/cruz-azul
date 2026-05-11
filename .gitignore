@@ -1,0 +1,4 @@
+node_modules/
+frontend/cruzazul.db
+*.log
+.env
