@@ -1,0 +1,302 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Infraestructura ERP Cruz Azul - EC2 frontend + ECS PostgreSQL
+
+Parameters:
+  GitHubRepoUrl:
+    Description: URL del repositorio de GitHub para clonar
+    Type: String
+  VpcId:
+    Description: ID de la VPC donde desplegar los recursos
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Description: IDs de subnets (al menos 2) para ECS Fargate
+    Type: List<AWS::EC2::Subnet::Id>
+  SubnetIdFrontend:
+    Description: ID de la subnet para la EC2 frontend
+    Type: AWS::EC2::Subnet::Id
+  KeyName:
+    Description: Nombre del KeyPair para SSH a EC2
+    Type: AWS::EC2::KeyPair::KeyName
+  VpcCidr:
+    Description: CIDR block de la VPC (ej. 10.0.0.0/16)
+    Type: String
+    Default: 10.0.0.0/16
+  DBPassword:
+    Description: Contraseña para PostgreSQL
+    Type: String
+    NoEcho: true
+
+Resources:
+  # ── Security Groups ──────────────────────────────────────
+  FrontendSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG for frontend EC2
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  DBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG for PostgreSQL on ECS
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref FrontendSG
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !Ref VpcCidr
+
+  # ── IAM ──────────────────────────────────────────────────
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EFSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                Resource: !Ref EFSFileSystem
+
+  # ── EC2 Frontend ─────────────────────────────────────────
+  FrontendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.small
+      ImageId: !Ref FrontendAMI
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !Ref FrontendSG
+      SubnetId: !Ref SubnetIdFrontend
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -ex
+          yum update -y
+          yum install -y docker git
+          systemctl start docker
+          systemctl enable docker
+          usermod -a -G docker ec2-user
+          curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+          cd /home/ec2-user
+          git clone ${GitHubRepoUrl} cruz-azul
+          cd cruz-azul
+          echo "DB_HOST=db.${PrivateDNSNamespace.Name}" >> .env
+          echo "DB_PASSWORD=${DBPassword}" >> .env
+          /usr/local/bin/docker-compose up -d
+      Tags:
+        - Key: Name
+          Value: cruzazul-frontend
+
+  FrontendAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+  # ── EFS para datos persistentes ──────────────────────────
+  EFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      Encrypted: true
+      BackupPolicy:
+        Status: ENABLED
+    DeletionPolicy: Retain
+
+  EFSMountTarget:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !Select [0, !Ref SubnetIds]
+      SecurityGroups:
+        - !Ref DBSG
+
+  EFSDataAP:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      PosixUser:
+        Uid: "999"
+        Gid: "999"
+      RootDirectory:
+        Path: /data
+        CreationInfo:
+          OwnerUid: "999"
+          OwnerGid: "999"
+          Permissions: "755"
+
+  # ── CloudMap Service Discovery ────────────────────────────
+  PrivateDNSNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: cruzazul.local
+      Vpc: !Ref VpcId
+
+  DBServiceDiscovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: db
+      DnsConfig:
+        NamespaceId: !GetAtt PrivateDNSNamespace.Id
+        DnsRecords:
+          - Type: A
+            TTL: 60
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  # ── ECS Cluster ──────────────────────────────────────────
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: cruzazul-db
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+          Base: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 1
+
+  PostgresLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/cruzazul-postgres
+      RetentionInDays: 7
+
+  PostgresTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: cruzazul-postgres
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: postgres
+          Image: postgres:15
+          Essential: true
+          PortMappings:
+            - ContainerPort: 5432
+              Protocol: tcp
+          Environment:
+            - Name: POSTGRES_DB
+              Value: cruzazul
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: !Ref DBPassword
+          LinuxParameters:
+            InitProcessEnabled: true
+          MountPoints:
+            - SourceVolume: postgres-data
+              ContainerPath: /var/lib/postgresql/data
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PostgresLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: postgres
+      Volumes:
+        - Name: postgres-data
+          EFSVolumeConfiguration:
+            FileSystemId: !Ref EFSFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref EFSDataAP
+              IAM: ENABLED
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: EFSMountTarget
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: cruzazul-postgres
+      TaskDefinition: !Ref PostgresTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref DBSG
+          Subnets: !Ref SubnetIds
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DBServiceDiscovery.Arn
+          ContainerName: postgres
+          ContainerPort: 5432
+
+Outputs:
+  FrontendPublicIP:
+    Description: IP publica del frontend (acceder via http)
+    Value: !GetAtt FrontendInstance.PublicIp
+  DBHost:
+    Description: Hostname de PostgreSQL (resuelve via CloudMap)
+    Value: !Sub db.${PrivateDNSNamespace.Name}
+  ECSClusterName:
+    Description: Nombre del cluster ECS
+    Value: !Ref ECSCluster
+  SSHCommand:
+    Description: Comando para conectar via SSH
+    Value: !Sub ssh -i "tu-key.pem" ec2-user@${FrontendInstance.PublicIp}
