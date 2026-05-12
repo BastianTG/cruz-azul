@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  db:
+    build: ./database
+    container_name: cruzazul-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: tu_password
+      POSTGRES_DB: cruzazul
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+volumes:
+  db_data:

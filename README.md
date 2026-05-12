@@ -1,32 +1,46 @@
 # ERP Cruz Azul
 
-App web para gestión de productos (inventario). Consta de un frontend HTML+JS vanilla servido por Express y una base de datos PostgreSQL.
+App web para gestión de productos (inventario). Frontend HTML+JS vanilla servido por Express con PostgreSQL.
 
 ## Stack
 
-| Capa       | Tecnología                        |
-|------------|-----------------------------------|
-| Frontend   | HTML5 + CSS3 + JavaScript vanilla |
-| Backend    | Node.js 18 + Express 4.x          |
-| Base de datos | PostgreSQL 15                  |
-| Contenedores | Docker + Docker Compose         |
+| Capa            | Tecnología                        |
+|-----------------|-----------------------------------|
+| Frontend        | HTML5 + CSS3 + JavaScript vanilla |
+| Backend         | Node.js 18 + Express 4.x          |
+| Base de datos   | PostgreSQL 15                     |
+| Contenedores    | Docker + Docker Compose           |
+
+## Cambios realizados
+
+| Cambio | Detalle |
+|--------|---------|
+| SQLite → PostgreSQL | `server.js` migrado de `sql.js` a `pg` (node-postgres). Conexión vía Pool con variables de entorno |
+| Puerto corregido | `docker.compose.yml`: `80:80` → `80:3000` |
+| Variables de BD | Agregadas `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` al compose |
+| Infraestructura AWS | Template CloudFormation en `infra/cloudformation.yaml` (EC2 + ECS + EFS + CloudMap) |
+| Despliegue EC2 dual | `docker-compose.frontend.yml` (solo app) + `docker-compose.backend.yml` (solo PostgreSQL) |
+| Control de versiones | `.gitignore` creado (node_modules, *.db, .env) |
 
 ## Estructura
 
 ```
 cruz-azul/
-├── database/           # Dockerfile + init.sql para PostgreSQL
+├── database/                       # Dockerfile + init.sql para PostgreSQL
 │   ├── Dockerfile
 │   └── init.sql
-├── frontend/           # App Node.js
+├── frontend/                       # App Node.js
 │   ├── Dockerfile
-│   ├── package.json
-│   ├── server.js       # API REST (Express)
+│   ├── package.json                # express + pg (sql.js eliminado)
+│   ├── server.js                   # API REST con PostgreSQL
 │   └── views/
-│       └── index.html  # SPA
+│       └── index.html              # SPA
 ├── infra/
-│   └── cloudformation.yaml  # Infra AWS (EC2 + ECS)
-├── docker.compose.yml
+│   └── cloudformation.yaml         # Template CloudFormation (EC2 + ECS + EFS)
+├── docker.compose.yml              # Local (frontend + db)
+├── docker-compose.frontend.yml     # Frontend EC2 — solo app, apunta a BD remota
+├── docker-compose.backend.yml      # Backend EC2 — solo PostgreSQL
+├── package-lock.json
 └── .gitignore
 ```
 
@@ -44,18 +58,46 @@ cruz-azul/
 ## Ejecutar local
 
 ```bash
-# Clonar y entrar
 git clone <repo> cruz-azul
 cd cruz-azul
-
-# Iniciar todo
 docker compose up -d
-
-# Acceder
 # http://localhost
 ```
 
-La app asume que PostgreSQL corre en el host `db` (definido via `DB_HOST`). En local con Docker Compose se resuelve automáticamente.
+La app asume que PostgreSQL corre en el host `db` (definido via `DB_HOST`). En local con Docker Compose se resuelve automáticamente gracias al servicio `db`.
+
+## Despliegue en producción (2 servidores EC2)
+
+### Backend (PostgreSQL) — 54.88.53.173
+
+```bash
+ssh ec2-user@54.88.53.173
+sudo yum install -y docker
+sudo systemctl start docker
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+git clone <repo> cruz-azul
+cd cruz-azul
+docker-compose -f docker-compose.backend.yml up -d
+```
+
+> Security Group del backend: permitir TCP **5432** desde `3.221.29.47/32`.
+
+### Frontend (Node.js) — 3.221.29.47
+
+```bash
+ssh ec2-user@3.221.29.47
+sudo yum install -y docker
+sudo systemctl start docker
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+git clone <repo> cruz-azul
+cd cruz-azul
+# Editar DB_PASSWORD en docker-compose.frontend.yml si es necesario
+docker-compose -f docker-compose.frontend.yml up -d
+```
+
+> Security Group del frontend: permitir HTTP **80** desde `0.0.0.0/0` y SSH **22** desde tu IP.
 
 ## Variables de entorno
 
