@@ -37,6 +37,9 @@ cruz-azul/
 │       └── index.html              # SPA
 ├── infra/
 │   └── cloudformation.yaml         # Template CloudFormation (EC2 + ECS + EFS)
+├── scripts/
+│   ├── setup-backend.sh            # Script automatizado para backend EC2
+│   └── setup-frontend.sh           # Script automatizado para frontend EC2
 ├── docker.compose.yml              # Local (frontend + db)
 ├── docker-compose.frontend.yml     # Frontend EC2 — solo app, apunta a BD remota
 ├── docker-compose.backend.yml      # Backend EC2 — solo PostgreSQL
@@ -68,17 +71,14 @@ La app asume que PostgreSQL corre en el host `db` (definido via `DB_HOST`). En l
 
 ## Despliegue en producción (2 servidores EC2)
 
+Usar los scripts automatizados en `scripts/`. Solo necesitan la URL del repo.
+
 ### Backend (PostgreSQL) — 54.88.53.173
 
 ```bash
 ssh ec2-user@54.88.53.173
-sudo yum install -y docker
-sudo systemctl start docker
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-git clone <repo> cruz-azul
-cd cruz-azul
-docker-compose -f docker-compose.backend.yml up -d
+sudo chmod +x scripts/setup-backend.sh
+./scripts/setup-backend.sh https://github.com/usuario/cruz-azul.git tu_password_segura
 ```
 
 > Security Group del backend: permitir TCP **5432** desde `3.221.29.47/32`.
@@ -87,14 +87,8 @@ docker-compose -f docker-compose.backend.yml up -d
 
 ```bash
 ssh ec2-user@3.221.29.47
-sudo yum install -y docker
-sudo systemctl start docker
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-git clone <repo> cruz-azul
-cd cruz-azul
-# Editar DB_PASSWORD en docker-compose.frontend.yml si es necesario
-docker-compose -f docker-compose.frontend.yml up -d
+sudo chmod +x scripts/setup-frontend.sh
+./scripts/setup-frontend.sh https://github.com/usuario/cruz-azul.git 54.88.53.173 tu_password_segura
 ```
 
 > Security Group del frontend: permitir HTTP **80** desde `0.0.0.0/0` y SSH **22** desde tu IP.
