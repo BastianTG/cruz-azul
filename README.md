@@ -73,10 +73,10 @@ La app asume que PostgreSQL corre en el host `db` (definido via `DB_HOST`). En l
 
 Usar los scripts automatizados en `scripts/`. Solo necesitan la URL del repo.
 
-### Backend (PostgreSQL) — 54.88.53.173
+### Backend (PostgreSQL) — 18.235.20.153
 
 ```bash
-ssh ec2-user@54.88.53.173
+ssh ec2-user@18.235.20.153
 sudo chmod +x scripts/setup-backend.sh
 ./scripts/setup-backend.sh https://github.com/usuario/cruz-azul.git tu_password_segura
 ```
@@ -88,7 +88,7 @@ sudo chmod +x scripts/setup-backend.sh
 ```bash
 ssh ec2-user@3.221.29.47
 sudo chmod +x scripts/setup-frontend.sh
-./scripts/setup-frontend.sh https://github.com/usuario/cruz-azul.git 54.88.53.173 tu_password_segura
+./scripts/setup-frontend.sh https://github.com/usuario/cruz-azul.git 18.235.20.153 tu_password_segura
 ```
 
 > Security Group del frontend: permitir HTTP **80** desde `0.0.0.0/0` y SSH **22** desde tu IP.
